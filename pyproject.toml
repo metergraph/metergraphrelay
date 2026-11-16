@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "metergraphrelay"
-version = "0.7.7"
+version = "0.7.8"
 description = "Move LLM trace data between systems: pull from providers, push to metergraph."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,9 +23,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/VasiliyRad/metergraphrelay"
-Repository = "https://github.com/VasiliyRad/metergraphrelay"
-Issues = "https://github.com/VasiliyRad/metergraphrelay/issues"
+Homepage = "https://github.com/metergraph/metergraphrelay"
+Repository = "https://github.com/metergraph/metergraphrelay"
+Issues = "https://github.com/metergraph/metergraphrelay/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

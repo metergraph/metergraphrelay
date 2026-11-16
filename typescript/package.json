@@ -1,0 +1,16 @@
+{
+  "name": "metergraphrelay",
+  "version": "0.1.0",
+  "description": "Forward normalized LLM telemetry to Metergraph from Node.js jobs.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.js"}},
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": {"node": ">=22.12.0"},
+  "repository": {"type": "git", "url": "git+https://github.com/metergraph/metergraphrelay.git", "directory": "typescript"},
+  "publishConfig": {"access": "public"},
+  "scripts": {"build": "tsc", "test": "npm run build && node --test", "prepack": "npm run build"},
+  "devDependencies": {"typescript": "~5.9.3"}
+}
