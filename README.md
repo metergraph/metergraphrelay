@@ -672,3 +672,7 @@ never runs in CI.
 Relay extracts provider status, error codes, finish reasons and explicit refusal
 signals before content conversion. Metergraph receivers use Core to classify
 availability and refusals; Relay does not depend on Core or classify outcomes.
+
+## TypeScript / Node.js
+
+A small forwarding library is available in [`typescript/`](typescript/README.md). It sends normalized records from application-owned export jobs; the Python CLI remains the provider import/sync tool.
