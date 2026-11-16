@@ -55,3 +55,11 @@ test('sends over HTTP and times out a stalled server', async () => {
     await assert.rejects(relay.send(rows,{idempotencyKey:'stall'}),{name:'TimeoutError'});
   } finally {server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));}
 });
+test('preserves cancellation while reading the acknowledgment', async () => {
+  const controller=new AbortController();
+  const relay=create(async () => {
+    controller.abort();
+    return {ok:true,json:async()=>{throw controller.signal.reason;}};
+  });
+  await assert.rejects(relay.send(rows,{signal:controller.signal}),{name:'AbortError'});
+});

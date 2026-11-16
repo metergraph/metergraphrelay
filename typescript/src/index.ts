@@ -56,7 +56,11 @@ export class MetergraphRelay {
     });
     if (!response.ok) { await response.body?.cancel(); throw new Error(`Metergraph ingest HTTP ${response.status}`); }
     let acknowledgment: unknown;
-    try { acknowledgment = await response.json(); } catch { throw new Error('Invalid Metergraph ingest acknowledgment'); }
+    try { acknowledgment = await response.json(); } catch {
+      options.signal?.throwIfAborted();
+      timeout.throwIfAborted();
+      throw new Error('Invalid Metergraph ingest acknowledgment');
+    }
     const result = acknowledgment as Partial<SendResult> | null;
     const accepted = result?.accepted;
     const ignored = result?.ignored ?? 0;
