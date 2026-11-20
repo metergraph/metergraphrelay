@@ -676,3 +676,42 @@ availability and refusals; Relay does not depend on Core or classify outcomes.
 ## TypeScript / Node.js
 
 A small forwarding library is available in [`typescript/`](typescript/README.md). It sends normalized records from application-owned export jobs; the Python CLI remains the provider import/sync tool.
+
+### Caller-supplied import exclusions
+
+Filter **normalized** JSONL before uploading it, or use the same policy in your
+own importer. Relay does not fetch rules or choose which source is authoritative.
+No policy means no exclusions. Rules OR together; their exact conditions AND
+together. Every rule requires a provider, workload (`route`) and aware cutover
+(timestamp inclusive); optional `timestamp_lt` is exclusive and `tags` matches
+exact string pairs. Unknown fields/versions and overly broad rules are rejected.
+
+```json
+{"version":1,"rules":[{"id":"direct-audit","conditions":{
+  "provider":"anthropic","route":"audit","timestamp_gte":"2026-01-01T00:00:00Z"
+}}]}
+```
+
+```sh
+metergraphrelay filter traces.jsonl --rules rules.json --output preview.jsonl --preview
+metergraphrelay filter traces.jsonl --rules rules.json --output filtered.jsonl
+```
+
+Preview writes all valid records and reports matches; normal mode omits matches.
+Neither command uploads anything or advances a sync checkpoint. Output is replaced
+only after the complete file succeeds. Records stream one at a time, capped at
+16 MiB each. Results report included/excluded counts, matches per rule and a policy
+fingerprint. Version 1 supports up to 100 rules and 10 tag conditions per rule.
+
+```python
+from metergraphrelay.filtering import ExclusionPolicy
+
+policy = ExclusionPolicy.from_dict(caller_supplied_rules)
+matched_rule = policy.evaluate(normalized_record)  # rule ID or None
+```
+
+An application can snapshot this validated policy for an import invocation and
+report intentional exclusions separately from malformed or missing records.
+Validate direct-source coverage before activating exclusions. Existing `pull`,
+`sync`, and `push` commands do not implicitly apply these rules. This import-tool
+API is Python; the TypeScript telemetry sender is unchanged.
