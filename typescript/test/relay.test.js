@@ -50,9 +50,11 @@ test('sends over HTTP and times out a stalled server', async () => {
   });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   try {
-    const relay=new MetergraphRelay({token:'test',baseUrl:`http://127.0.0.1:${server.address().port}`,timeoutMs:100});
+    const baseUrl=`http://127.0.0.1:${server.address().port}`;
+    const relay=new MetergraphRelay({token:'test',baseUrl,timeoutMs:5000});
     assert.equal((await relay.send(rows)).accepted,1);
-    await assert.rejects(relay.send(rows,{idempotencyKey:'stall'}),{name:'TimeoutError'});
+    const stalledRelay=new MetergraphRelay({token:'test',baseUrl,timeoutMs:100});
+    await assert.rejects(stalledRelay.send(rows,{idempotencyKey:'stall'}),{name:'TimeoutError'});
   } finally {server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));}
 });
 test('preserves cancellation while reading the acknowledgment', async () => {

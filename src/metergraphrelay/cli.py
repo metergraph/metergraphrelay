@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
+import json
 import os
 import sys
 import tempfile
@@ -699,6 +701,12 @@ def build_parser() -> argparse.ArgumentParser:
     push_parser.add_argument("file")
     push_parser.add_argument("--env-file", default=".env")
 
+    filter_parser = subparsers.add_parser('filter', help='Filter normalized JSONL using caller-supplied exclusion rules; no network')
+    filter_parser.add_argument('file')
+    filter_parser.add_argument('--rules', required=True, help='Version 1 exclusion policy JSON file')
+    filter_parser.add_argument('--output', required=True)
+    filter_parser.add_argument('--preview', action='store_true', help='Report matches but retain every record in output')
+
     return parser
 
 
@@ -1284,6 +1292,18 @@ def _run_pull_phoenix(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == 'filter':
+        from pathlib import Path
+        from .filtering import ExclusionPolicy, filter_jsonl
+        try:
+            policy = ExclusionPolicy.from_dict(json.loads(Path(args.rules).read_text()))
+            result = filter_jsonl(args.file, args.output, policy, preview=args.preview)
+        except (ValueError, OSError) as exc:
+            print(f'Filter failed: {exc}', file=sys.stderr)
+            return 1
+        print(json.dumps(asdict(result)))
+        return 0
 
     if args.command == "pull" and args.provider == "anthropic":
         try:
