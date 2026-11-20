@@ -677,17 +677,15 @@ availability and refusals; Relay does not depend on Core or classify outcomes.
 
 A small forwarding library is available in [`typescript/`](typescript/README.md). It sends normalized records from application-owned export jobs; the Python CLI remains the provider import/sync tool.
 
-### Caller-supplied import exclusions
+## Import exclusions
 
-Filter **normalized** JSONL before uploading it, or use the same policy in your
-own importer. Relay does not fetch rules or choose which source is authoritative.
-No policy means no exclusions. Rules OR together; their exact conditions AND
-together. Every rule requires a provider, workload (`route`) and aware cutover
-(timestamp inclusive); optional `timestamp_lt` is exclusive and `tags` matches
-exact string pairs. Unknown fields/versions and overly broad rules are rejected.
+Filter normalized JSONL using rules supplied by your CLI or application. A record
+is excluded when it matches every condition in any rule. Each rule requires an
+exact provider, workload (`route`) and inclusive `timestamp_gte`; optional
+`timestamp_lt` is exclusive, and `tags` matches exact string pairs.
 
 ```json
-{"version":1,"rules":[{"id":"direct-audit","conditions":{
+{"version":1,"rules":[{"id":"audit","conditions":{
   "provider":"anthropic","route":"audit","timestamp_gte":"2026-01-01T00:00:00Z"
 }}]}
 ```
@@ -697,21 +695,17 @@ metergraphrelay filter traces.jsonl --rules rules.json --output preview.jsonl --
 metergraphrelay filter traces.jsonl --rules rules.json --output filtered.jsonl
 ```
 
-Preview writes all valid records and reports matches; normal mode omits matches.
-Neither command uploads anything or advances a sync checkpoint. Output is replaced
-only after the complete file succeeds. Records stream one at a time, capped at
-16 MiB each. Results report included/excluded counts, matches per rule and a policy
-fingerprint. Version 1 supports up to 100 rules and 10 tag conditions per rule.
+Preview retains all records and reports matches. Normal mode excludes matching
+records. Results include kept/excluded counts, matches per rule and a policy
+fingerprint. Output is replaced only after the complete file succeeds.
 
 ```python
 from metergraphrelay.filtering import ExclusionPolicy
 
-policy = ExclusionPolicy.from_dict(caller_supplied_rules)
+policy = ExclusionPolicy.from_dict(rules)
 matched_rule = policy.evaluate(normalized_record)  # rule ID or None
 ```
 
-An application can snapshot this validated policy for an import invocation and
-report intentional exclusions separately from malformed or missing records.
-Validate direct-source coverage before activating exclusions. Existing `pull`,
-`sync`, and `push` commands do not implicitly apply these rules. This import-tool
-API is Python; the TypeScript telemetry sender is unchanged.
+Policies support up to 100 rules and 10 tag conditions per rule. JSONL processing
+streams records with a 16 MiB limit per record. Invalid policies or records raise
+an error.
