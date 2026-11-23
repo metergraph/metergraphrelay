@@ -171,15 +171,21 @@ def test_every_langfuse_tag_lands_as_a_string_pair(key):
 
 def test_customer_metadata_lands_and_sdk_metadata_does_not():
     tags = row("openai_cached_reasoning")["tags"]
-    assert tags["customer_tier"] == "gold"
-    assert tags["feature"] == "support-triage"
-    assert tags["nested.attempt"] == "1"
-    assert tags["nested.region"] == "us-west-2"
-    assert not any(
-        key.startswith(("resourceAttributes.", "scope.", "ls_", "lc_versions."))
-        for key in tags
-    )
-    assert "is_langchain_root" not in row("langchain_generation")["tags"]
+    assert tags["langfuse.metadata.customer_tier"] == "gold"
+    assert tags["langfuse.metadata.feature"] == "support-triage"
+    assert tags["langfuse.metadata.nested.attempt"] == "1"
+    assert tags["langfuse.metadata.nested.region"] == "us-west-2"
+    sdk_written = ("resourceAttributes.", "scope.", "ls_", "lc_versions.", "is_langchain_root")
+    for key in (*tags, *row("langchain_generation")["tags"]):
+        assert not key.removeprefix("langfuse.metadata.").startswith(sdk_written), key
+
+
+def test_release_version_and_prompt_are_filterable_tags():
+    tags = row("openai_cached_reasoning")["tags"]
+    assert tags["langfuse.release"] == MANIFEST["release"]
+    assert tags["langfuse.version"] == MANIFEST["traces"]["main"]["version"]
+    assert tags["langfuse.prompt.name"] == "mg-conformance-prompt"
+    assert tags["langfuse.prompt.version"] == "1"
 
 
 def test_attribution_fields_carry_through():
@@ -207,9 +213,12 @@ def test_error_observation_keeps_its_status_message():
 def test_tags_never_exceed_the_server_limit_and_langfuse_tags_come_first():
     metadata = {f"k{index:03d}": "v" for index in range(60)}
     source = dict(observation("o4_mini"), metadata=metadata, tags=["zz-last", "aa"])
-    tags = normalize_observation(source, route_override=None)["tags"]
+    tags = normalize_observation(source, route_override="r")["tags"]
     assert len(tags) == 32
     assert tags["langfuse.tag.zz-last"] == "true" and tags["langfuse.tag.aa"] == "true"
+    assert tags["name"] == "conformance-workflow"
+    assert tags["langfuse.release"] == MANIFEST["release"]
+    assert "langfuse.metadata.k000" in tags and "langfuse.metadata.k059" not in tags
 
 
 # --- pulling the fixture as one page -----------------------------------------

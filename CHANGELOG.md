@@ -18,8 +18,11 @@ Langfuse import (`pull langfuse` and `sync langfuse`):
   per-bucket `reported_cost_details`.
 - **Tags land.** Each Langfuse tag is one `tags` pair,
   `langfuse.tag.<tag>: "true"`. They used to be sent as one list, which
-  metergraph drops because it keeps only string values. Trace metadata
-  lands in `tags` too, scalar values as strings, without SDK-written keys.
+  metergraph drops because it keeps only string values. `tags` also carries
+  `langfuse.release`, `langfuse.version`, `langfuse.prompt.name`,
+  `langfuse.prompt.version` and the metadata as `langfuse.metadata.<key>`
+  (scalar values as strings, without SDK-written keys), at most 32 pairs with
+  Langfuse tags first.
 - **Timing and attribution.** Rows carry `latency_ms`, `ttft_ms`, `user_id`,
   `trace_name`, `release`, `version`, `prompt_name`, `prompt_version` and
   `model_parameters` when Langfuse has them.

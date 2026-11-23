@@ -10,7 +10,8 @@ What this is here to catch:
 
 * **Tags.** The server keeps only string values in ``tags``. Langfuse tags used
   to travel as one list and were dropped whole; each must now land as its own
-  ``langfuse.tag.<tag>: "true"`` pair, next to the customer's metadata.
+  ``langfuse.tag.<tag>: "true"`` pair, next to the customer's metadata
+  (``langfuse.metadata.<key>``).
 * **Timing.** ``latency_ms`` and ``ttft_ms`` come from Langfuse's seconds.
 * **Every cost-bearing observation lands**, embeddings included, with the
   provider resolved and Langfuse's cost carried as ``reported_cost_usd``.
@@ -112,7 +113,7 @@ def main() -> None:
         for tag in trace["tags"]:
             assert tags.get(f"langfuse.tag.{tag}") == "true", (key, tags)
         if spec["trace"] == "main":
-            assert tags.get("customer_tier") == "gold", (key, tags)
+            assert tags.get("langfuse.metadata.customer_tier") == "gold", (key, tags)
         if "user_id" in item and trace.get("user_id"):
             assert item["user_id"] == trace["user_id"], (key, item["user_id"])
         if readback.get("latency") is not None:

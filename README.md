@@ -187,16 +187,16 @@ With no other flags, this imports the latest 100 observations overall
     metergraphrelay pull langfuse --trace-name support-bot-reply --trace-name billing-bot-reply --tag prod --tag tier-1
     metergraphrelay pull langfuse --user-id user-42 --session-id chat-7 --metadata feature=support-triage
 
-- `--trace-name` matches Langfuse's trace name — the closest Langfuse
+- `--trace-name` matches Langfuse's trace name, the closest Langfuse
   concept to a workflow or use case (e.g. `"support-bot-reply"`). It's
   repeatable; multiple `--trace-name` values are **OR'd** together (any
   match).
-- `--tag` matches Langfuse trace tags — commonly used as customer-defined
+- `--tag` matches Langfuse trace tags, commonly used as customer-defined
   categories (a tenant, an experiment cohort, a priority tier); this is
   a convention, not something Langfuse enforces. It's repeatable;
   multiple `--tag` values require **all** of them to be present (AND).
   `--tag` only matches tags that already exist on your historical
-  data — it can't require a tag that was never set, and if you don't
+  data: it can't require a tag that was never set, and if you don't
   pass `--tag` at all, there's no tag-based narrowing (not "untagged
   only").
 - `--user-id` and `--session-id` match Langfuse's user and session ids
@@ -217,12 +217,15 @@ original kept as `langfuse_model`) and model families (`gpt-`, `o4-`,
 always kept as `reported_cost_usd` (with `reported_cost_details`), so a
 model metergraph's catalog cannot price still has Langfuse's figure.
 Each Langfuse tag lands in `tags` as its own pair,
-`langfuse.tag.<tag>: "true"`, next to the trace's metadata (scalar
-values as strings; SDK-written keys such as `resourceAttributes.*` are
-left out), at most 32 pairs with Langfuse tags kept first. Rows also
-carry `latency_ms`, `ttft_ms`, `user_id`, `session_id`, `trace_name`,
-`release`, `version`, `prompt_name`, `prompt_version` and
-`model_parameters` when Langfuse has them.
+`langfuse.tag.<tag>: "true"`, followed by `langfuse.release`,
+`langfuse.version`, `langfuse.prompt.name`, `langfuse.prompt.version` and
+the observation's metadata as `langfuse.metadata.<key>` (scalar values as
+strings; SDK-written keys such as `resourceAttributes.*` are left out), at
+most 32 pairs with Langfuse tags kept first. These are the key names
+metergraph's SDK uses for Langfuse spans, so a call lands the same way on
+either path. Rows also carry `latency_ms`, `ttft_ms`, `user_id`,
+`session_id`, `trace_name`, `release`, `version`, `prompt_name`,
+`prompt_version` and `model_parameters` when Langfuse has them.
 
 **Rate limits.** HTTP 429 and gateway errors (502, 503, 504) are retried
 up to six times, after Langfuse's `Retry-After` when it sends one, else

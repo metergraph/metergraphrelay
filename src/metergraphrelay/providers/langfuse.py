@@ -819,6 +819,9 @@ MAX_TAG_KEY_LENGTH = 200
 MAX_TAG_VALUE_LENGTH = 1000
 LANGFUSE_TAG_PREFIX = "langfuse.tag."
 LANGFUSE_TAG_VALUE = "true"
+LANGFUSE_METADATA_PREFIX = "langfuse.metadata."
+# The same key names the metergraph SDK's Langfuse exporter writes, so a call
+# lands identically whichever path brought it in.
 # Metadata the Langfuse and LangChain SDKs write themselves. It describes the
 # instrumentation, not the call, and would crowd out the customer's own keys.
 _SDK_METADATA_PREFIXES = ("resourceAttributes.", "scope.", "lc_versions.", "ls_")
@@ -870,12 +873,14 @@ def _customer_metadata(metadata: Any) -> dict[str, str]:
 
 
 def build_tags(observation: dict[str, Any], *, name: str | None = None) -> dict[str, str]:
-    """The row's ``tags`` map: Langfuse tags, then the name, then metadata.
+    """The row's ``tags`` map, in priority order, at most 32 pairs.
 
-    Each Langfuse tag becomes its own pair, ``langfuse.tag.<tag>: "true"``, so a
-    metadata filter or group-by on one tag works. Langfuse tags are kept
-    first, then the relay's ``name`` (when ``--route`` replaced the trace
-    name), then the customer's metadata in key order, up to 32 pairs.
+    1. Each Langfuse tag as its own pair, ``langfuse.tag.<tag>: "true"``, so a
+       metadata filter or group-by on one tag works.
+    2. ``name``, the trace name, when ``--route`` replaced it as the route.
+    3. ``langfuse.release``, ``langfuse.version``, ``langfuse.prompt.name``
+       and ``langfuse.prompt.version``.
+    4. The customer's metadata as ``langfuse.metadata.<key>``, in key order.
     """
     tags: dict[str, str] = {}
     langfuse_tags = observation.get("tags")
@@ -888,10 +893,19 @@ def build_tags(observation: dict[str, Any], *, name: str | None = None) -> dict[
                 tags[key] = LANGFUSE_TAG_VALUE
     if name:
         tags["name"] = name
+    prompt_version = observation.get("promptVersion")
+    for key, value in (
+        ("langfuse.release", _nonempty_string(observation.get("release"))),
+        ("langfuse.version", _nonempty_string(observation.get("version"))),
+        ("langfuse.prompt.name", _nonempty_string(observation.get("promptName"))),
+        ("langfuse.prompt.version", str(prompt_version) if _is_int(prompt_version) else None),
+    ):
+        if value is not None and len(value) <= MAX_TAG_VALUE_LENGTH:
+            tags[key] = value
     for key, value in sorted(_customer_metadata(observation.get("metadata")).items()):
-        if len(tags) >= MAX_TAG_PAIRS:
-            break
-        tags.setdefault(key, value)
+        prefixed = f"{LANGFUSE_METADATA_PREFIX}{key}"
+        if len(prefixed) <= MAX_TAG_KEY_LENGTH:
+            tags.setdefault(prefixed, value)
     if len(tags) > MAX_TAG_PAIRS:
         tags = dict(list(tags.items())[:MAX_TAG_PAIRS])
     return tags
