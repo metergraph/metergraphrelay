@@ -140,6 +140,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Filter to a single Langfuse environment value. (default: no filter, all environments)",
     )
     _add_langfuse_attribution_selectors(pull_langfuse_parser)
+    pull_langfuse_parser.add_argument(
+        "--source-scope",
+        default=None,
+        help=(
+            "Import scope the rows carry, which the server deduplicates on "
+            "together with the observation id. Pass the --source-scope you give "
+            "sync langfuse so a pull and a sync of the same project never store "
+            "an observation twice. (default: derived from the host and public "
+            "key, the same on every pull of a project)"
+        ),
+    )
     pull_content = pull_langfuse_parser.add_mutually_exclusive_group()
     pull_content.add_argument(
         "--include-content",
@@ -1060,6 +1071,7 @@ def _run_pull_langfuse(args: argparse.Namespace) -> int:
             session_id=args.session_id,
             metadata=metadata,
             include_content=args.include_content,
+            source_scope=(args.source_scope or "").strip() or None,
         )
     except (LangfuseAPIError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

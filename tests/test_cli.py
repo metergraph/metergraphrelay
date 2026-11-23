@@ -153,6 +153,7 @@ def test_main_pull_langfuse_dispatches_to_pull_langfuse(tmp_path):
         session_id=None,
         metadata=[],
         include_content=True,
+        source_scope=None,
     )
 
 
@@ -183,6 +184,19 @@ def test_main_pull_langfuse_passes_attribution_selectors_and_content_opt_out(tmp
     # Only the first "=" splits, so a value may itself contain "=".
     assert kwargs["metadata"] == [("feature", "support-triage"), ("tier", "a=b")]
     assert kwargs["include_content"] is False
+
+
+def test_main_pull_langfuse_passes_an_explicit_source_scope(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("LANGFUSE_PUBLIC_KEY=pk-1\nLANGFUSE_SECRET_KEY=sk-1\n")
+
+    with patch("metergraphrelay.cli.pull_langfuse", return_value=(0, 0)) as mock_pull:
+        exit_code = main(_pull_langfuse_args(
+            env_file, tmp_path / "out.jsonl", "--source-scope", " prod-project ",
+        ))
+
+    assert exit_code == 0
+    assert mock_pull.call_args.kwargs["source_scope"] == "prod-project"
 
 
 def test_main_pull_langfuse_rejects_metadata_selector_without_equals(tmp_path, capsys):

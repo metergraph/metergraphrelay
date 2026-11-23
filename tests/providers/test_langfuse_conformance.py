@@ -20,6 +20,7 @@ from metergraphrelay.providers.langfuse import (
     MAX_RETRIES,
     LangfuseAPIError,
     build_base_params,
+    default_import_scope,
     fetch_observations_page,
     is_importable_observation,
     normalize_observation,
@@ -266,6 +267,74 @@ def test_pull_with_exclude_content_strips_input_and_output(tmp_path):
         assert normalized["content_opted_in"] is False
         for field in ("request_json", "request_text", "response_text", "tool_calls"):
             assert field not in normalized
+
+
+def _pull_rows(tmp_path, name, data, **overrides):
+    output = tmp_path / f"{name}.jsonl"
+    kwargs = dict(
+        base_url="https://cloud.langfuse.com", public_key="pk", secret_key="sk",
+        count=1000, since=None, until="2026-01-02T00:00:00Z", trace_names=[],
+        tags=[], environment=None, route=None, output_path=str(output),
+    )
+    kwargs.update(overrides)
+    with patch(
+        "metergraphrelay.providers.langfuse.fetch_observations_page",
+        return_value={"data": data, "meta": {"cursor": None}},
+    ):
+        pull_langfuse(**kwargs)
+    return [json.loads(line) for line in output.read_text().splitlines()]
+
+
+def _server_claims(*pushes):
+    """The server's dedup gate: the first row with an identity wins."""
+    stored = {}
+    for rows in pushes:
+        for pushed in rows:
+            identity = (
+                pushed["import_source"], pushed["import_source_scope"],
+                pushed["import_event_id"],
+            )
+            stored.setdefault(identity, pushed)
+    return stored
+
+
+def test_a_re_pull_of_the_same_window_dedups_on_the_import_identity(tmp_path):
+    first = _pull_rows(tmp_path, "first", OBSERVATIONS["data"])
+    # The re-sync sees the same observations again, one of them edited late
+    # (Langfuse updated its cost), plus nothing new.
+    edited = [dict(obs) for obs in OBSERVATIONS["data"]]
+    for obs in edited:
+        if obs["id"] == MANIFEST["observations"]["o4_mini"]["id"]:
+            obs["totalCost"] = (obs.get("totalCost") or 0) + 1
+    second = _pull_rows(tmp_path, "second", edited)
+
+    for pushed in first + second:
+        assert pushed["import_source"] == "langfuse"
+        # The event id is Langfuse's observation id, the same id span_id
+        # and request_id carry, so scorers that match on span_id still do.
+        assert pushed["import_event_id"] == pushed["span_id"] == pushed["request_id"]
+    assert {r["import_source_scope"] for r in first + second} == {
+        default_import_scope("https://cloud.langfuse.com", "pk")
+    }
+    stored = _server_claims(first, second)
+    assert len(stored) == len(first) == len(COST_KEYS)
+    assert sorted(r["span_id"] for r in stored.values()) == sorted(
+        MANIFEST["observations"][key]["id"] for key in COST_KEYS
+    )
+
+
+def test_the_default_scope_is_per_project_and_carries_no_key():
+    scope = default_import_scope("https://cloud.langfuse.com/", "pk-lf-secretish")
+    assert scope == default_import_scope("HTTPS://cloud.langfuse.com", " pk-lf-secretish ")
+    assert scope != default_import_scope("https://cloud.langfuse.com", "pk-lf-other")
+    assert scope != default_import_scope("https://us.cloud.langfuse.com", "pk-lf-secretish")
+    assert "pk-lf" not in scope and "langfuse.com" not in scope
+    assert 1 <= len(scope) <= 255
+
+
+def test_an_explicit_source_scope_matches_sync_rows(tmp_path):
+    rows = _pull_rows(tmp_path, "scoped", OBSERVATIONS["data"], source_scope="prod-project")
+    assert {r["import_source_scope"] for r in rows} == {"prod-project"}
 
 
 def test_build_base_params_sends_attribution_selectors_in_the_filter():

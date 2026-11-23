@@ -16,6 +16,8 @@ What this is here to catch:
 * **Every cost-bearing observation lands**, embeddings included, with the
   provider resolved and Langfuse's cost carried as ``reported_cost_usd``.
 * **Attribution**, where the server's read returns it: ``user_id``.
+* **Re-syncs do not duplicate.** The same pull is pushed twice; every
+  observation must be stored once, deduplicated on its import identity.
 
 Run it against a server whose ``/v1/calls`` returns ``tags``, ``ttft_ms``,
 ``user_id`` and ``reported_cost_usd``: metergraph's hosted app does; the OSS
@@ -54,7 +56,7 @@ def _fixture_page(base_url, *, public_key, secret_key, params, sleep=None):
     return {"data": observations["data"], "meta": {"cursor": None}}
 
 
-def _read_back(base_url: str, token: str, route: str) -> dict[str, dict]:
+def _read_rows(base_url: str, token: str, route: str) -> list[dict]:
     query = urllib.parse.urlencode({"route": route, "limit": 500})
     request = urllib.request.Request(
         f"{base_url}/v1/calls?{query}",
@@ -62,9 +64,11 @@ def _read_back(base_url: str, token: str, route: str) -> dict[str, dict]:
     )
     with urllib.request.urlopen(request, timeout=10) as response:
         payload = json.load(response)
-    return {
-        item["request_id"]: item for item in payload["items"] if item["route"] == route
-    }
+    return [item for item in payload["items"] if item["route"] == route]
+
+
+def _read_back(base_url: str, token: str, route: str) -> dict[str, dict]:
+    return {item["request_id"]: item for item in _read_rows(base_url, token, route)}
 
 
 def main() -> None:
@@ -93,6 +97,9 @@ def main() -> None:
         assert (imported, skipped) == (len(cost_keys), 0), (imported, skipped)
         pushed, failed = push_file(str(output), token, base_url=base_url)
         assert (pushed, failed) == (imported, 0), (pushed, failed)
+        # A re-sync of the same window: the server must drop every row.
+        pushed, failed = push_file(str(output), token, base_url=base_url)
+        assert (pushed, failed) == (imported, 0), (pushed, failed)
 
     # A server with a queue (the hosted app's worker) stores rows a little
     # after the push returns; wait for all of them, within a bound.
@@ -102,6 +109,15 @@ def main() -> None:
     while not expected_ids <= stored.keys() and time.monotonic() < deadline:
         time.sleep(2)
         stored = _read_back(base_url, token, route)
+    # Give the second push's batch time to be processed (and dropped) too.
+    time.sleep(float(os.environ.get("MG_DEDUP_SETTLE_SECONDS", "10")))
+    rows = _read_rows(base_url, token, route)
+    duplicated = sorted(
+        request_id for request_id in {r["request_id"] for r in rows}
+        if sum(r["request_id"] == request_id for r in rows) > 1
+    )
+    assert not duplicated, f"re-sync stored these observations twice: {duplicated}"
+    stored = {r["request_id"]: r for r in rows}
     report = []
     for key in cost_keys:
         spec = manifest["observations"][key]
@@ -141,7 +157,10 @@ def main() -> None:
         })
     if os.environ.get("MG_REPORT"):
         Path(os.environ["MG_REPORT"]).write_text(json.dumps(report, indent=2) + "\n")
-    print(f"langfuse e2e: {len(report)} rows round-tripped with tags, timing and cost")
+    print(
+        f"langfuse e2e: {len(report)} rows round-tripped with tags, timing and cost;"
+        " a second push of the same rows stored none"
+    )
 
 
 if __name__ == "__main__":

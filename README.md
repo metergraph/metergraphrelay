@@ -239,6 +239,15 @@ attribution only, marked `content_opted_in: false`. (`--include-content`
 states the default explicitly.) `sync langfuse` is the other way round:
 content is uploaded only with `--include-content`.
 
+**Re-pulling is safe.** Every row carries an import identity: the
+Langfuse observation id plus a scope for the project. metergraph stores
+each identity once, so pushing an overlapping pull again does not double
+count. By default the scope is derived from the host and public key (a
+digest, never the key itself), the same on every pull of a project. If
+you also run `sync langfuse` for the project, give `pull` the same
+`--source-scope` so the two never store an observation twice. A later
+edit of an observation in Langfuse is not re-imported by a re-pull.
+
 Full flag reference: `metergraphrelay pull langfuse --help`.
 
 ## Pull from Braintrust

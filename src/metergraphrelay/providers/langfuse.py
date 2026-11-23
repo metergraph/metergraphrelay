@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import email.utils
+import hashlib
 import json
 import math
 import os
@@ -1044,6 +1045,21 @@ def strip_content(row: dict) -> dict:
     return row
 
 
+def default_import_scope(base_url: str, public_key: str) -> str:
+    """A stable ``import_source_scope`` for a ``pull`` of one Langfuse project.
+
+    A Langfuse API key pair belongs to exactly one project, so the host plus
+    the public key names the project. Only a digest of them goes on the row:
+    the scope is an identity for deduplication, not a place to carry a key.
+    Re-pulling the same project gives the same scope, so the server's
+    (source, scope, observation id) claim drops a re-pulled observation
+    instead of storing it twice.
+    """
+    host = base_url.strip().rstrip("/").lower()
+    digest = hashlib.sha256(f"{host}\n{public_key.strip()}".encode()).hexdigest()
+    return f"pull:{digest[:32]}"
+
+
 def _cleanup_temp_file(tmp_path: str) -> None:
     try:
         os.remove(tmp_path)
@@ -1072,7 +1088,15 @@ def pull_langfuse(
     observation_types: Iterable[str] = COST_BEARING_TYPES,
     include_content: bool = True,
     sleep: Callable[[float], object] = time.sleep,
+    source_scope: str | None = None,
 ) -> tuple[int, int]:
+    if import_context is None:
+        # Every pulled row carries an import identity, not only sync's: without
+        # one, pushing an overlapping pull again stores each observation twice.
+        import_context = ImportContext(
+            source="langfuse",
+            source_scope=source_scope or default_import_scope(base_url, public_key),
+        )
     base_params = build_base_params(
         until=until,
         since=since,

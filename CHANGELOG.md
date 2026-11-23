@@ -34,6 +34,11 @@ Langfuse import (`pull langfuse` and `sync langfuse`):
 - **Content.** `pull langfuse --exclude-content` leaves input and output in
   Langfuse (`--include-content`, the default, says so explicitly). The
   `sync langfuse` help no longer claims content is uploaded with no opt-out.
+- **Re-pulls deduplicate.** `pull langfuse` rows now carry the same import
+  identity as `sync` rows (`import_source`, `import_source_scope`,
+  `import_event_id` = the observation id), so pushing an overlapping pull
+  again stores nothing twice. The scope defaults to a digest of the host and
+  public key; `--source-scope` sets it, for example to match `sync`.
 
 For library callers: `build_base_params` still requests `GENERATION` alone
 unless given `observation_types`; pass `COST_BEARING_TYPES` and keep rows with
