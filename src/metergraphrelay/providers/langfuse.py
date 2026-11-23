@@ -769,8 +769,10 @@ def is_importable_observation(observation: Any) -> bool:
     if kind not in COST_BEARING_TYPES or _resolve_model_name(observation) is None:
         return False
     usage = observation.get("usageDetails")
+    # Usage units need not be whole tokens (Langfuse allows audio seconds and
+    # other fractional units), so any positive finite number counts.
     has_usage = isinstance(usage, dict) and any(
-        _is_int(value) and value > 0 for value in usage.values()
+        _positive_number(value) for value in usage.values()
     )
     return has_usage or _positive_number(observation.get("totalCost"))
 

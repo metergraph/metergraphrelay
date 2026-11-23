@@ -77,6 +77,8 @@ def test_a_non_generation_type_needs_usage_or_cost():
     assert not is_importable_observation(tool)
     assert is_importable_observation(dict(tool, totalCost=0.001))
     assert is_importable_observation(dict(tool, usageDetails={"input": 3}))
+    assert is_importable_observation(dict(tool, usageDetails={"audio_seconds": 1.5}))
+    assert not is_importable_observation(dict(tool, usageDetails={"input": 0, "x": True}))
     assert not is_importable_observation(dict(observation("llm_step"), model="gpt-4o", totalCost=1.0))
 
 
