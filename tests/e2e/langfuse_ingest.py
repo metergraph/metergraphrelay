@@ -16,7 +16,11 @@ What this is here to catch:
   provider resolved and Langfuse's cost carried as ``reported_cost_usd``.
 * **Attribution**, where the server's read returns it: ``user_id``.
 
-Set ``MG_URL`` and ``MG_TOKEN``. ``MG_REPORT`` names a file to write the
+Run it against a server whose ``/v1/calls`` returns ``tags``, ``ttft_ms``,
+``user_id`` and ``reported_cost_usd``: metergraph's hosted app does; the OSS
+server's read does not return them yet, so this is not part of the OSS CI job.
+
+Set ``MG_URL`` and ``MG_TOKEN`` (a key with ingest and read scope). ``MG_REPORT`` names a file to write the
 read-back rows to (cost status and catalog price per row), for comparing a
 server's pricing with Langfuse's.
 """
