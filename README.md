@@ -154,12 +154,14 @@ buckets; add a provider there, not in an adapter.
 
 ## Pull from Langfuse
 
-Import Langfuse **GENERATION** observations (the LLM call records
-Langfuse captures) into the same metergraph-native JSONL shape as
-`pull openai`. Only `GENERATION` observations are imported — Langfuse
-`SPAN`/`EVENT` observations and Scores/evals are never imported.
-Requires Langfuse Cloud or **self-hosted v4+** (the version serving the
-v2 Observations API); older self-hosted deployments are not supported.
+Import the Langfuse observations that record an LLM call into the same
+metergraph-native JSONL shape as `pull openai`: every `GENERATION`, and
+any `EMBEDDING`, `AGENT`, `TOOL`, `CHAIN`, `RETRIEVER`, `EVALUATOR` or
+`GUARDRAIL` observation that names a model and carries usage or a cost
+(each row keeps its `observation_type`). Structural spans with no model,
+`SPAN`/`EVENT` observations and scores are not imported. Requires
+Langfuse Cloud or **self-hosted v4+** (the version serving the v2
+Observations API); older self-hosted deployments are not supported.
 
 **Setup:** add your Langfuse keys to `.env`:
 
@@ -176,37 +178,75 @@ set `LANGFUSE_BASE_URL` in `.env` (or pass `--base-url` per-command):
     metergraphrelay pull langfuse -n 25 --output traces.jsonl
     metergraphrelay push traces.jsonl
 
-With no other flags, this imports the latest 100 `GENERATION`
-observations overall (not 100 distinct traces).
+With no other flags, this imports the latest 100 observations overall
+(not 100 distinct traces).
 
 **Narrowing what gets pulled**, beyond `-n`/`--count`:
 
     metergraphrelay pull langfuse --since 2026-08-01T00:00:00Z --until 2026-08-07T00:00:00Z
     metergraphrelay pull langfuse --trace-name support-bot-reply --trace-name billing-bot-reply --tag prod --tag tier-1
+    metergraphrelay pull langfuse --user-id user-42 --session-id chat-7 --metadata feature=support-triage
 
-- `--trace-name` matches Langfuse's trace name — the closest Langfuse
+- `--trace-name` matches Langfuse's trace name, the closest Langfuse
   concept to a workflow or use case (e.g. `"support-bot-reply"`). It's
   repeatable; multiple `--trace-name` values are **OR'd** together (any
   match).
-- `--tag` matches Langfuse trace tags — commonly used as customer-defined
+- `--tag` matches Langfuse trace tags, commonly used as customer-defined
   categories (a tenant, an experiment cohort, a priority tier); this is
   a convention, not something Langfuse enforces. It's repeatable;
   multiple `--tag` values require **all** of them to be present (AND).
   `--tag` only matches tags that already exist on your historical
-  data — it can't require a tag that was never set, and if you don't
+  data: it can't require a tag that was never set, and if you don't
   pass `--tag` at all, there's no tag-based narrowing (not "untagged
   only").
-- `--trace-name`, `--tag`, `--environment`, and `--since`/`--until` all
-  combine with each other using AND.
-- `--count` is always a cap on the number of **GENERATION observations**
-  imported, never a count of distinct traces.
+- `--user-id` and `--session-id` match Langfuse's user and session ids
+  exactly; `--metadata KEY=VALUE` matches one metadata key exactly and is
+  repeatable (AND).
+- Every selector, `--environment` and `--since`/`--until` combine with
+  each other using AND.
+- `--count` is always a cap on the number of **observations** imported,
+  never a count of distinct traces.
 
-**Before running this against your own data:** `pull langfuse`
-transfers every matched generation's prompt/response content from
-Langfuse into your local JSONL file, and from there into metergraph via
-`push`, with no separate opt-in step — unlike `pull openai`'s
-`--include-content` flag, there is no way to pull Langfuse generations
-without their content.
+**What each row carries.** The provider is resolved from the
+observation's metadata (`provider`, LangChain's `ls_provider`, OTel
+`gen_ai.system`) or from the model name: Bedrock ids and ARNs
+(`us.anthropic.claude-...`), Vertex resource paths, gateway prefixes
+(`openai/gpt-4o` becomes provider `openai`, model `gpt-4o`, with the
+original kept as `langfuse_model`) and model families (`gpt-`, `o4-`,
+`claude-`, `gemini-`, `mistral-`, `llama-`...). Langfuse's own cost is
+always kept as `reported_cost_usd` (with `reported_cost_details`), so a
+model metergraph's catalog cannot price still has Langfuse's figure.
+Each Langfuse tag lands in `tags` as its own pair,
+`langfuse.tag.<tag>: "true"`, followed by `langfuse.release`,
+`langfuse.version`, `langfuse.prompt.name`, `langfuse.prompt.version` and
+the observation's metadata as `langfuse.metadata.<key>` (scalar values as
+strings; SDK-written keys such as `resourceAttributes.*` are left out), at
+most 32 pairs with Langfuse tags kept first. These are the key names
+metergraph's SDK uses for Langfuse spans, so a call lands the same way on
+either path. Rows also carry `latency_ms`, `ttft_ms`, `user_id`,
+`session_id`, `trace_name`, `release`, `version`, `prompt_name`,
+`prompt_version` and `model_parameters` when Langfuse has them.
+
+**Rate limits.** HTTP 429 and gateway errors (502, 503, 504) are retried
+up to six times, after Langfuse's `Retry-After` when it sends one, else
+after 2, 4, 8... seconds, never more than two minutes at a time.
+
+**Content.** By default `pull langfuse` copies every matched
+observation's input and output from Langfuse into your local JSONL file,
+and from there into metergraph via `push`. Pass `--exclude-content` to
+leave it in Langfuse: the rows then carry usage, cost, timing and
+attribution only, marked `content_opted_in: false`. (`--include-content`
+states the default explicitly.) `sync langfuse` is the other way round:
+content is uploaded only with `--include-content`.
+
+**Re-pulling is safe.** Every row carries an import identity: the
+Langfuse observation id plus a scope for the project. metergraph stores
+each identity once, so pushing an overlapping pull again does not double
+count. By default the scope is derived from the host and public key (a
+digest, never the key itself), the same on every pull of a project. If
+you also run `sync langfuse` for the project, give `pull` the same
+`--source-scope` so the two never store an observation twice. A later
+edit of an observation in Langfuse is not re-imported by a re-pull.
 
 Full flag reference: `metergraphrelay pull langfuse --help`.
 
@@ -577,7 +617,7 @@ same cron line is safe from several machines.
     metergraphrelay sync phoenix    --source-scope my-project --initial-since 2026-08-01T00:00:00+00:00 --project my-project
 
 Each takes the selectors of its `pull` counterpart (`--trace-name`/`--tag`/
-`--environment`, `--project`, `--name`) plus `--route`, but **no
+`--environment`/`--user-id`/`--session-id`/`--metadata`, `--project`, `--name`) plus `--route`, but **no
 `--since`/`--until`/`--count`**: the server chooses the window and every
 row in it must land before the checkpoint advances.
 

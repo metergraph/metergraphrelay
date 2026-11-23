@@ -149,7 +149,90 @@ def test_main_pull_langfuse_dispatches_to_pull_langfuse(tmp_path):
         environment=None,
         route=None,
         output_path=str(output_path),
+        user_id=None,
+        session_id=None,
+        metadata=[],
+        include_content=True,
+        source_scope=None,
     )
+
+
+def _pull_langfuse_args(env_file, output_path, *extra):
+    return [
+        "pull", "langfuse", "--env-file", str(env_file), "--output", str(output_path),
+        "--until", "2026-08-07T00:00:00+00:00", *extra,
+    ]
+
+
+def test_main_pull_langfuse_passes_attribution_selectors_and_content_opt_out(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("LANGFUSE_PUBLIC_KEY=pk-1\nLANGFUSE_SECRET_KEY=sk-1\n")
+    output_path = tmp_path / "out.jsonl"
+
+    with patch("metergraphrelay.cli.pull_langfuse", return_value=(0, 0)) as mock_pull:
+        exit_code = main(_pull_langfuse_args(
+            env_file, output_path,
+            "--user-id", "user-1", "--session-id", "sess-1",
+            "--metadata", "feature=support-triage", "--metadata", "tier=a=b",
+            "--exclude-content",
+        ))
+
+    assert exit_code == 0
+    kwargs = mock_pull.call_args.kwargs
+    assert kwargs["user_id"] == "user-1"
+    assert kwargs["session_id"] == "sess-1"
+    # Only the first "=" splits, so a value may itself contain "=".
+    assert kwargs["metadata"] == [("feature", "support-triage"), ("tier", "a=b")]
+    assert kwargs["include_content"] is False
+
+
+def test_main_pull_langfuse_passes_an_explicit_source_scope(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("LANGFUSE_PUBLIC_KEY=pk-1\nLANGFUSE_SECRET_KEY=sk-1\n")
+
+    with patch("metergraphrelay.cli.pull_langfuse", return_value=(0, 0)) as mock_pull:
+        exit_code = main(_pull_langfuse_args(
+            env_file, tmp_path / "out.jsonl", "--source-scope", " prod-project ",
+        ))
+
+    assert exit_code == 0
+    assert mock_pull.call_args.kwargs["source_scope"] == "prod-project"
+
+
+def test_main_pull_langfuse_rejects_metadata_selector_without_equals(tmp_path, capsys):
+    env_file = tmp_path / ".env"
+    env_file.write_text("LANGFUSE_PUBLIC_KEY=pk-1\nLANGFUSE_SECRET_KEY=sk-1\n")
+
+    with patch("metergraphrelay.cli.pull_langfuse") as mock_pull:
+        exit_code = main(_pull_langfuse_args(env_file, tmp_path / "o.jsonl", "--metadata", "feature"))
+
+    assert exit_code != 0
+    mock_pull.assert_not_called()
+    assert "--metadata expects KEY=VALUE" in capsys.readouterr().err
+
+
+def test_main_pull_langfuse_content_flags_are_mutually_exclusive(tmp_path):
+    env_file = tmp_path / ".env"
+    with pytest.raises(SystemExit):
+        main(_pull_langfuse_args(env_file, tmp_path / "o.jsonl", "--include-content", "--exclude-content"))
+
+
+def test_sync_langfuse_help_no_longer_claims_content_has_no_opt_out(capsys):
+    with pytest.raises(SystemExit):
+        main(["sync", "langfuse", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "no opt-out" not in text
+    assert "uploaded only with --include-content" in text
+    assert "--user-id" in text and "--session-id" in text and "--metadata" in text
+    assert "\u2014" not in text  # no em dashes in user-facing copy
+
+
+def test_pull_langfuse_help_has_no_em_dashes_and_names_content_flags(capsys):
+    with pytest.raises(SystemExit):
+        main(["pull", "langfuse", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "\u2014" not in text
+    assert "--exclude-content" in text and "EMBEDDING" in text
 
 
 def test_main_pull_langfuse_credentials_are_loaded_from_env(tmp_path):
@@ -1490,6 +1573,8 @@ def test_sync_langfuse_dispatches_with_an_explicit_scope(tmp_path, capsys):
                 "--initial-since", "2026-08-01T00:00:00Z",
                 "--max-window-seconds", "1800",
                 "--trace-name", "support-desk/triage", "--tag", "prod",
+                "--user-id", "user-1", "--session-id", "sess-1",
+                "--metadata", "feature=support-triage",
             ]
         )
 
@@ -1515,6 +1600,9 @@ def test_sync_langfuse_dispatches_with_an_explicit_scope(tmp_path, capsys):
     assert kwargs["provider_errors"] == (LangfuseAPIError,)
     assert kwargs["allow_skipped"] is False
     assert pulled["since"] == "2026-08-19T00:00:00+00:00"
+    assert pulled["user_id"] == "user-1"
+    assert pulled["session_id"] == "sess-1"
+    assert pulled["metadata"] == [("feature", "support-triage")]
     assert pulled["until"] == "2026-08-19T01:00:00+00:00"
     assert pulled["count"] >= 1_000_000
     assert pulled["trace_names"] == ["support-desk/triage"]

@@ -10,6 +10,7 @@ import pytest
 from metergraphrelay import __version__
 from metergraphrelay.import_identity import ImportContext, ImportIdentityError
 from metergraphrelay.providers.langfuse import (
+    COST_BEARING_TYPES,
     PAGE_LIMIT,
     LangfuseAPIError,
     RESPONSE_FIELDS,
@@ -751,7 +752,8 @@ def test_normalize_observation_full_row():
         "error": False,
         "error_type": None,
         "request_id": "obs-1",
-        "tags": {"langfuse_tags": ["prod", "tier-1"]},
+        # One pair per Langfuse tag: metergraph keeps only string values.
+        "tags": {"langfuse.tag.prod": "true", "langfuse.tag.tier-1": "true"},
         "route": "support-bot",
         "content_opted_in": True,
         "request_json": json.dumps([{"role": "user", "content": "hi"}]),
@@ -762,6 +764,8 @@ def test_normalize_observation_full_row():
         "parent_span_id": None,
         "session_id": None,
         "environment": "production",
+        "trace_name": "support-bot",
+        "observation_type": "GENERATION",
     }
 
 
@@ -1033,7 +1037,7 @@ def test_pull_langfuse_passes_selectors_into_a_single_combined_request(tmp_path)
             "type": "stringOptions",
             "column": "type",
             "operator": "any of",
-            "value": ["GENERATION"],
+            "value": list(COST_BEARING_TYPES),
         },
         {
             "type": "datetime",

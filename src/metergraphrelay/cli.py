@@ -63,19 +63,22 @@ def build_parser() -> argparse.ArgumentParser:
     pull_langfuse_parser = pull_subparsers.add_parser(
         "langfuse",
         description=(
-            "Pull Langfuse GENERATION observations (LLM call records) into a "
-            "local JSONL file shaped for metergraph's ingest API. SPAN/EVENT "
-            "observations and scores/evals are not imported. Requires Langfuse "
-            "Cloud or self-hosted v4+ (the v2 Observations API). With no "
-            "--trace-name/--tag/--environment/--since/--until given, imports "
-            "the latest --count GENERATION observations overall. WARNING: "
-            "generation input/output content is transferred from Langfuse "
-            "into the local output file, and from there into metergraph via "
-            "`push`, with no opt-in gate."
+            "Pull Langfuse observations that record an LLM call into a local "
+            "JSONL file shaped for metergraph's ingest API: every GENERATION, "
+            "and any EMBEDDING, AGENT, TOOL, CHAIN, RETRIEVER, EVALUATOR or "
+            "GUARDRAIL observation that names a model and carries usage or a "
+            "cost. Structural spans, events and scores are not imported. "
+            "Requires Langfuse Cloud or self-hosted v4+ (the v2 Observations "
+            "API). With no selector, --since or --until, imports the latest "
+            "--count observations overall. Rate limits (HTTP 429) and gateway "
+            "errors are retried after Langfuse's Retry-After. Input and output "
+            "content is copied into the output file by default; pass "
+            "--exclude-content to leave it in Langfuse."
         ),
         help=(
-            "Pull GENERATION call records from Langfuse (v2 Observations "
-            "API, Cloud/self-hosted v4+); no evals/spans/events"
+            "Pull LLM call records (generations, embeddings and other "
+            "cost-bearing observations) from Langfuse (v2 Observations API, "
+            "Cloud/self-hosted v4+)"
         ),
     )
     pull_langfuse_parser.add_argument(
@@ -84,8 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help=(
-            "Maximum number of GENERATION observations to import (never a "
-            "count of distinct traces). (default: 100)"
+            "Maximum number of observations to import (never a count of "
+            "distinct traces). (default: 100)"
         ),
     )
     pull_langfuse_parser.add_argument(
@@ -111,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="NAME",
         help=(
-            "Only import generations whose trace name is NAME. Repeatable: "
+            "Only import observations whose trace name is NAME. Repeatable: "
             "multiple --trace-name values are OR'd together (any match). "
             "Combines with --tag/--environment/--since/--until using AND. "
             "(default: no filter, all trace names)"
@@ -123,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="TAG",
         help=(
-            "Only import generations whose trace has tag TAG. Repeatable: "
+            "Only import observations whose trace has tag TAG. Repeatable: "
             "multiple --tag values require ALL given tags to be present "
             "(AND). Combines with --trace-name/--environment/--since/--until "
             "using AND. Only matches tags that already exist on the data; "
@@ -136,14 +139,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Filter to a single Langfuse environment value. (default: no filter, all environments)",
     )
+    _add_langfuse_attribution_selectors(pull_langfuse_parser)
+    pull_langfuse_parser.add_argument(
+        "--source-scope",
+        default=None,
+        help=(
+            "Import scope the rows carry, which the server deduplicates on "
+            "together with the observation id. Pass the --source-scope you give "
+            "sync langfuse so a pull and a sync of the same project never store "
+            "an observation twice. (default: derived from the host and public "
+            "key, the same on every pull of a project)"
+        ),
+    )
+    pull_content = pull_langfuse_parser.add_mutually_exclusive_group()
+    pull_content.add_argument(
+        "--include-content",
+        dest="include_content",
+        action="store_true",
+        default=True,
+        help="Copy observation input and output into the output file. (default)",
+    )
+    pull_content.add_argument(
+        "--exclude-content",
+        dest="include_content",
+        action="store_false",
+        help=(
+            "Leave observation input and output in Langfuse: the rows carry "
+            "usage, cost, timing and attribution only, marked content_opted_in "
+            "false."
+        ),
+    )
     pull_langfuse_parser.add_argument(
         "--route",
         default=None,
         help=(
             "Override the metergraph route field for every imported row. "
             "(default: the Langfuse trace name, or the generation's own "
-            "name if the trace has none) Not a selector — see --trace-name "
-            "for filtering which generations are pulled."
+            "name if the trace has none). Not a selector: see --trace-name "
+            "for filtering which observations are pulled."
         ),
     )
     pull_langfuse_parser.add_argument(
@@ -537,7 +570,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync_langfuse_parser = sync_subparsers.add_parser(
         "langfuse",
         description=(
-            "Sync Langfuse GENERATION observations to metergraph in server-"
+            "Sync Langfuse LLM call records (every GENERATION, and any other "
+            "observation that names a model and carries usage or a cost) to "
+            "metergraph in server-"
             "coordinated cron mode: pull one logical time window (at most one "
             "hour) from the Langfuse Observations API and push it, with "
             "acquire/resume/complete owned by the metergraph import-sync "
@@ -546,10 +581,12 @@ def build_parser() -> argparse.ArgumentParser:
             "METERGRAPH_APP_TOKEN. --source-scope names this sync stream on the "
             "metergraph side and is required: the checkpoint is keyed on it. "
             "--initial-since seeds only the "
-            "first run. Observation content is uploaded with no opt-out."
+            "first run. Observation input and output are uploaded only with "
+            "--include-content; without it the rows carry usage, cost, timing "
+            "and attribution only."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Sync Langfuse generations to metergraph (server-coordinated cron mode)",
+        help="Sync Langfuse LLM call records to metergraph (server-coordinated cron mode)",
     )
     _add_sync_common(sync_langfuse_parser, scope_help=(
         "Name of this sync stream on the metergraph side, e.g. the Langfuse "
@@ -559,16 +596,17 @@ def build_parser() -> argparse.ArgumentParser:
     ))
     sync_langfuse_parser.add_argument(
         "--trace-name", action="append", default=None, metavar="TRACE_NAME",
-        help="Only sync generations whose trace has this name. Repeatable (OR).",
+        help="Only sync observations whose trace has this name. Repeatable (OR).",
     )
     sync_langfuse_parser.add_argument(
         "--tag", action="append", default=None, metavar="TAG",
-        help="Only sync generations whose trace carries this tag. Repeatable (AND).",
+        help="Only sync observations whose trace carries this tag. Repeatable (AND).",
     )
     sync_langfuse_parser.add_argument(
         "--environment", default=None,
-        help="Only sync generations from this Langfuse environment.",
+        help="Only sync observations from this Langfuse environment.",
     )
+    _add_langfuse_attribution_selectors(sync_langfuse_parser)
     sync_langfuse_parser.add_argument(
         "--base-url", default=None,
         help=(
@@ -708,6 +746,37 @@ def build_parser() -> argparse.ArgumentParser:
     filter_parser.add_argument('--preview', action='store_true', help='Report matches but retain every record in output')
 
     return parser
+
+
+def _add_langfuse_attribution_selectors(parser: argparse.ArgumentParser) -> None:
+    """--user-id, --session-id and --metadata, shared by pull and sync langfuse."""
+    parser.add_argument(
+        "--user-id", default=None, metavar="USER_ID",
+        help="Only import observations whose trace has this Langfuse user id.",
+    )
+    parser.add_argument(
+        "--session-id", default=None, metavar="SESSION_ID",
+        help="Only import observations in this Langfuse session.",
+    )
+    parser.add_argument(
+        "--metadata", action="append", default=None, metavar="KEY=VALUE",
+        help=(
+            "Only import observations whose metadata has KEY equal to VALUE. "
+            "Repeatable: every pair must match (AND)."
+        ),
+    )
+
+
+def _langfuse_metadata_selectors(values: list[str] | None) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for value in values or ():
+        key, separator, text = value.partition("=")
+        if not separator or not key.strip():
+            raise ConfigError(
+                f"--metadata expects KEY=VALUE, got {value!r}."
+            )
+        pairs.append((key.strip(), text))
+    return pairs
 
 
 def _add_sync_common(parser: argparse.ArgumentParser, *, scope_help: str) -> None:
@@ -982,6 +1051,10 @@ def _run_pull_langfuse(args: argparse.Namespace) -> int:
     )
     until = args.until or datetime.now(timezone.utc).isoformat()
     try:
+        metadata = _langfuse_metadata_selectors(args.metadata)
+    except ConfigError as exc:
+        return _config_error(exc)
+    try:
         imported, skipped = pull_langfuse(
             base_url=base_url,
             public_key=public_key,
@@ -994,11 +1067,16 @@ def _run_pull_langfuse(args: argparse.Namespace) -> int:
             environment=args.environment,
             route=args.route,
             output_path=args.output,
+            user_id=args.user_id,
+            session_id=args.session_id,
+            metadata=metadata,
+            include_content=args.include_content,
+            source_scope=(args.source_scope or "").strip() or None,
         )
     except (LangfuseAPIError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    print(f"Imported {imported} trace(s), skipped {skipped}, to {args.output}")
+    print(f"Imported {imported} observation(s), skipped {skipped}, to {args.output}")
     return 0
 
 
@@ -1105,6 +1183,7 @@ def _run_sync_langfuse(args: argparse.Namespace) -> int:
     )
     try:
         source_scope = _require_source_scope(args)
+        metadata = _langfuse_metadata_selectors(args.metadata)
     except ConfigError as exc:
         return _config_error(exc)
 
@@ -1123,6 +1202,9 @@ def _run_sync_langfuse(args: argparse.Namespace) -> int:
             output_path=output_path,
             import_context=import_context,
             on_progress=on_progress,
+            user_id=args.user_id,
+            session_id=args.session_id,
+            metadata=metadata,
         )
 
     return _run_sync_pull(
